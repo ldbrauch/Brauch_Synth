@@ -166,6 +166,10 @@ class ModulatedOscillator:
 
         if self.freq_mods:
             freq_factors = pow(2, sum(next(freq_mod) for freq_mod in self.freq_mods))
+            # freq_factors = np.power(2, next(self.freq_mods[0]))
+            # freq_factors = next(self.freq_mods[0])
+
+            # print(freq_factors)
             self.oscillator.freq = freq_factors * self.oscillator.init_freq
 
     def change_wave_shape(self, shape_index):
@@ -195,7 +199,7 @@ class ModulatedOscillator:
 
     def __next__(self):
         # mod_vals = np.array([next(modulator) for modulator in self.amp_mods])
-        self._modulate()
+        # self._modulate()
         return next(self.oscillator)
 
     # renders an array of the next num_frames frames. to replace __next__ but vectorized.

@@ -55,17 +55,19 @@ class Oscillator(VariableOscillator):
     def _saw_iterator(self):
         end = self._i + self.buffer_size
         indexes = np.linspace(self._i, end, num=self.buffer_size, endpoint=False)
+
         divs = indexes / self._period
-        divs = 2 * (divs - np.floor(0.5 + divs))
+        floor = np.floor(0.5 + divs)
+        vals = 2 * (divs - floor)
         self._i = end
-        return divs * self._a
+        return vals * self._a
 
     # generate a triangle wave
     def _triangle_iterator(self):
         end = self._i + self.buffer_size
         indexes = np.linspace(self._i, end, num=self.buffer_size, endpoint=False)
-        divs = indexes / self._period
-        divs = 2 * (divs - np.floor(0.5 + divs))
+        vals = indexes / self._period
+        divs = 2 * (vals - np.floor(0.5 + vals))
         divs = (np.abs(divs) - 0.5) * 2
         self._i = end
         return divs * self._a
@@ -200,11 +202,14 @@ class Synthesizer(threading.Thread):
                 # NEW code
                 # put in the selected LFOs
                 for i in range(3):
-                    lfo = Oscillator(LFOs[i].freq, amp=LFOs[i].amp,
-                                                     buffer_size=buffer_size)
+
                     if i in current_amp_LFO:
+                        lfo = Oscillator(LFOs[i].freq, amp=LFOs[i].amp,
+                                         buffer_size=buffer_size)
                         amp_modulators.append(lfo)
                     if i in current_pitch_LFO:
+                        lfo = Oscillator(LFOs[i].freq, amp=LFOs[i].amp,
+                                         buffer_size=buffer_size)
                         pitch_modulators.append(lfo)
 
                 # for lfo_index in current_phase_LFO:
