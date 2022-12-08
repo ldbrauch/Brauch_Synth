@@ -8,28 +8,47 @@ import numpy as np
 
 # a simple oscillator that can change wave shape while a note is playing
 class VariableOscillator(ABC):
-    def __init__(self, freq=440, phase=0, amp=1, wave_range=(-1, 1), wave_shape=0):
+    def __init__(self, freq=440, phase=0, amp=1, wave_range=(-1, 1),
+                 wave_shape=0, buffer_size=256, detune=1):
         # the initial conditions, so that it remembers what it started at
         self._freq = freq
         self._amp = amp
         self._phase = phase
         self._wave_range = wave_range
         self._wave_shape = wave_shape
-
+        self.buffer_size = buffer_size
         # Properties that will be changed
         self._f = freq
         self._a = amp
         self._p = phase
+        self._detune = detune
 
-        self.freq = self._freq
-        self.phase = self._phase
-        self.amp = self._amp
+        self._i = 0
+
+        self.freq = freq
+        self.phase = phase
+        self.amp = amp
         self._initialize_osc()
 
     # the initial properties
     @property
     def init_freq(self):
         return self._freq
+
+    @property
+    def stop(self):
+        if isinstance(self._step, float):
+            return self._i + (self.buffer_size * self._step)
+        else:
+            return self._i + np.sum(self._step)
+
+    # returns an array of the next indexes and updates _i
+    @property
+    def next_indexes(self):
+        stop = self.stop
+        indexes = np.linspace(self._i, stop, num=self.buffer_size, endpoint=False)
+        self._i = stop
+        return indexes
 
     @property
     def init_amp(self):
@@ -50,6 +69,16 @@ class VariableOscillator(ABC):
         self._f = value
         self._post_freq_set()
 
+    @property
+    def detune(self):
+        return self._detune
+
+    # changes the frequency
+    @detune.setter
+    def detune(self, value):
+        self._detune = value
+        self._post_freq_set()
+
     # same for amp and phase
     @property
     def amp(self):
@@ -59,6 +88,15 @@ class VariableOscillator(ABC):
     def amp(self, value):
         self._a = value
         self._post_amp_set()
+
+    # vectorized
+    @property
+    def amps(self):
+        return self._a
+
+    @amps.setter
+    def amps(self, value):
+        self._a = value
 
     @property
     def phase(self):
@@ -96,6 +134,7 @@ class VariableOscillator(ABC):
     def sine_gen(self, num_frames):
         pass
 
+
 # a class that will modulate the oscillator via the modulators inputted.
 class ModulatedOscillator:
     def __init__(self, oscillator, amp_modulators=None, freq_modulators=None, freq_scale=0):
@@ -118,48 +157,22 @@ class ModulatedOscillator:
         # [iter(amp_modulator) for amp_modulator in self.phase_mods]
         return self
 
-    def _modulate(self):
+    def _modulation(self):
         # if any amplitude modulators are passed through, modulate the sound.
-        # amp_mod is the amplitude of all the modulators multiplied for that frame.
         if self.amp_mods:
-            amp_mod = np.ndarray.prod(np.array([next(amp_mod) for amp_mod in self.amp_mods]))
-            # amp_mod = next(self.amp_mods[0])
+            amp_mod = np.prod([next(amp_mod) for amp_mod in self.amp_mods], axis=0)
+            # an array fo the next amplitudes
+            self.oscillator.amps = self.oscillator.init_amp * amp_mod
 
-            # amp_mod = np.ndarray.prod(mod_vals)
-            self.oscillator.amp = self.oscillator.init_amp * amp_mod
-            # print(new_amp)
         if self.freq_mods:
-            # freq_factor = pow(2, np.sum([next(freq_mod) * self.freqScale for freq_mod in self.freq_mods]))
-            freq_factor = pow(2, next(self.freq_mods[0]) * self.freqScale)
-            new_freq = freq_factor * self.oscillator.init_freq
-            self.oscillator.freq = new_freq
-
-        # if self.phase_mods is not None:
-        #     phase_mod = np.prod([next(phase_mod) for phase_mod in self.phase_mods]) * 360
-        #     new_phase = self.oscillator.init_phase + phase_mod
-        #     self.oscillator.phase = new_phase
-        #     # TODO: Dont include phase?
-
-        #     if self._modulators_count == 3:
-        #         mod_val = mod_vals[2]
-        #     else:
-        #         mod_val = mod_vals[-1]
-        #     new_phase = self.phase_mod(self.oscillator.init_phase, mod_val)
-        #     self.oscillator.phase = new_phase
+            freq_factors = pow(2, sum(next(freq_mod) for freq_mod in self.freq_mods))
+            self.oscillator.freq = freq_factors * self.oscillator.init_freq
 
     def change_wave_shape(self, shape_index):
         self.oscillator.change_wave_shape(shape_index)
 
-    def change_freq(self, factor):
-        self.oscillator.freq = self.oscillator.init_freq * factor
-
-    # @property
-    # def freqScale(self):
-    #     return self._freqScale
-    #
-    # @freqScale.setter
-    # def freqScale(self, value):
-    #     self._freqScale = value
+    def detune(self, factor):
+        self.oscillator.detune = factor
 
     def trigger_release(self):
         tr = "trigger_release"
@@ -186,21 +199,21 @@ class ModulatedOscillator:
         return next(self.oscillator)
 
     # renders an array of the next num_frames frames. to replace __next__ but vectorized.
-    def rend(self, num_frames):
-        return self.oscillator.sine_gen(num_frames)
-
+    def rend(self):
+        self._modulation()
+        return next(self.oscillator)
 
 
 class ADSREnvelope:
     def __init__(self, attack_duration=0.05, decay_duration=0.2, sustain_level=0.7, \
-                 release_duration=0.3, sample_rate=44100):
+                 release_duration=0.3, sample_rate=44100, buffer_size=256):
         self.attack_duration = attack_duration
         self.decay_duration = decay_duration
         self.sustain_level = sustain_level
         self.release_duration = release_duration
         self._sample_rate = sample_rate
+        self.buffer_size = buffer_size
         # test
-        self.val = 0
         self.ended = False
         self.stepper = self.get_ads_stepper()
 
@@ -235,8 +248,8 @@ class ADSREnvelope:
     def get_r_stepper(self):
         val = 1
         if self.release_duration > 0:
-            release_step = - self.val / (self.release_duration * self._sample_rate)
-            stepper = itertools.count(self.val, step=release_step)
+            release_step = - self.vals[-1] / (self.release_duration * self._sample_rate)
+            stepper = itertools.count(self.vals[-1], step=release_step)
         else:
             val = -1
         while True:
@@ -254,8 +267,9 @@ class ADSREnvelope:
     #     return self
 
     def __next__(self):
-        self.val = next(self.stepper)
-        return self.val
+        # self.val = next(self.stepper)
+        self.vals = np.fromiter(self.stepper, dtype=float, count=self.buffer_size)
+        return self.vals
 
     def trigger_release(self):
         self.stepper = self.get_r_stepper()

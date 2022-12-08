@@ -9,12 +9,12 @@ import keyboard
 import threading
 import App
 
-
 # sample rate must be low in order to allow complicated processes to take place smoothly.
 # sample_rate = 11025
 # you may need a fast computer to play multiple notes at once :/
-max_voices = 2
+max_voices = 12
 sample_rate = 44100
+buffer_size = 256
 
 
 # def main():
@@ -22,70 +22,57 @@ sample_rate = 44100
 
 # code modified from https://python.plainenglish.io/making-a-synth-with-python-oscillators-2cb8e68e9c3b
 class Oscillator(VariableOscillator):
+    def _initialize_osc(self):
+        self.wave_shape_to_func = [self._sine_iterator,
+                                   self._square_iterator,
+                                   self._saw_iterator,
+                                   self._triangle_iterator]
+        self.rend = self.wave_shape_to_func[self._wave_shape]  # the default
+
     def _post_freq_set(self):
-        self._step = (2 * math.pi * self._f) / sample_rate
-        self._period = sample_rate / self._f
+        # this can be a number or an array
+        self._step = (2 * math.pi * self._f * self.detune) / sample_rate
+        self._period = sample_rate / (self._f * self.detune)
 
     def _post_phase_set(self):
         self._p = (self._p / 360) * 2 * math.pi
 
-    def _initialize_osc(self):
-        self._i = 0
-        self.wave_shape_to_func = [self._sine_iterator, self._square_iterator, self._saw_iterator,
-                                   self._triangle_iterator]
-        self.iterate = self.wave_shape_to_func[self._wave_shape]  # the default
-
     def __next__(self):
-        return self.iterate()
+        return self.rend()
 
-    # generates a sine wave
+    # generates a bunch of frames all at once for a sine wave.
     def _sine_iterator(self):
-        val = math.sin(self._i + self._p)
-        self._i = self._i + self._step
-        return val * self._a
-
-    # generates a bunch of frames all at once.
-    def sine_gen(self, num_frames):
-        stop = self._i + (num_frames * self._step)
-        # calculate all the _i values for the next num_frames
-        # indexes = np.arange(self._i, stop, self._step)
-        indexes = np.linspace(self._i, stop, num=num_frames, endpoint=False)
-        # update _i so that it starts where this has ended.
-        self._i = stop
-        vals = np.sin(indexes) * self._a
-        return vals
+        return np.sin(self.next_indexes) * self._a
 
     # generates a square wave
     def _square_iterator(self):
-        val = math.sin(self._i + self._p)
-        self._i = self._i + self._step
+        vals = np.sin(self.next_indexes)
         # threshold the value to -1 or 1
-        if val < 0:
-            val = -1
-        else:
-            val = 1
-        return val * self._a
+        vals = np.where(vals > 0, 1, -1)
+        return vals * self._a
 
     # generate a sawtooth wave
     def _saw_iterator(self):
-        div = (self._i + self._p) / self._period
-        val = 2 * (div - math.floor(0.5 + div))
-        self._i = self._i + 1
-        return val * self._a
+        end = self._i + self.buffer_size
+        indexes = np.linspace(self._i, end, num=self.buffer_size, endpoint=False)
+        divs = indexes / self._period
+        divs = 2 * (divs - np.floor(0.5 + divs))
+        self._i = end
+        return divs * self._a
 
     # generate a triangle wave
     def _triangle_iterator(self):
-        div = (self._i + self._p) / self._period
-        val = 2 * (div - math.floor(0.5 + div))
-        val = (abs(val) - 0.5) * 2
-        self._i = self._i + 1
-        return val * self._a
+        end = self._i + self.buffer_size
+        indexes = np.linspace(self._i, end, num=self.buffer_size, endpoint=False)
+        divs = indexes / self._period
+        divs = 2 * (divs - np.floor(0.5 + divs))
+        divs = (np.abs(divs) - 0.5) * 2
+        self._i = end
+        return divs * self._a
 
     # whenever the wave shape is changed it changes the function that __next__ calls.
     def change_wave_shape(self, new_wave_shape):
-        self.iterate = self.wave_shape_to_func[new_wave_shape]
-
-
+        self.rend = self.wave_shape_to_func[new_wave_shape]
 
 
 # class WaveAdder:
@@ -112,17 +99,19 @@ class Oscillator(VariableOscillator):
 
 # the default frequency
 
-default_LFO = 1
+default_LFO_freq = 1
 
 LFOs = [
-    Oscillator(freq=default_LFO),  # LFO1
-    Oscillator(freq=default_LFO),  # LFO2
-    Oscillator(freq=default_LFO)  # LFO3
+    Oscillator(freq=default_LFO_freq, buffer_size=buffer_size),  # LFO1
+    Oscillator(freq=default_LFO_freq, buffer_size=buffer_size),  # LFO2
+    Oscillator(freq=default_LFO_freq, buffer_size=buffer_size)  # LFO3
 ]
 
 # a list of ints, indicating the idnex of the LFOs that are active.
 current_amp_LFO = []
 current_pitch_LFO = []
+
+
 # current_phase_LFO = []
 
 
@@ -134,25 +123,22 @@ class Synthesizer(threading.Thread):
         self.notes_dict = {}
         # the total volume basically
         self.amp = 0
+        self.detune = 1
         self.setup_stream()
 
     def run(self):
         self.play()
 
-    def get_samples(self, dictionary, num_samples=256, amp_scale=0.2, max_amp=0.8):
-        ## TODO: VECTORIZE THE BELOW LOOP.
-        # samples = []
-        # for _ in range(num_samples):
-        #     samples.append(
-        #         [next(osc[0]) * self.amp for _, osc in dictionary.items()]
-        #     )
-        samples = [osc[0].rend(num_samples) * self.amp for _, osc in dictionary.items()]
+    def get_samples(self, dictionary, amp_scale=0.2, max_amp=0.8):
+
+        # samples = [osc[0].rend() * self.amp for _, osc in dictionary.items()]
+        # force it to copy all the values
+        samples = [osc[0].rend() * self.amp for _, osc in list(dictionary.items())]
         # sums up all the different sounds and reduces the volume
-        # samples = np.array(samples).sum(axis=1) * amp_scale
         samples = sum(samples) * amp_scale
         # clips the sound so that it doesn't burst your eardrums
         samples = np.int16(samples.clip(-max_amp, max_amp) * 32767)
-        return samples # samples.reshape(num_samples, -1)
+        return samples  # samples.reshape(num_samples, -1)
 
     def change_shape(self, shape_index):
         oscillators = [o[0] for k, o in self.notes_dict.items()]
@@ -163,8 +149,8 @@ class Synthesizer(threading.Thread):
     def update_pitch(self, factor):
         oscillators = [o[0] for k, o in self.notes_dict.items()]
         for osc in oscillators:
-            # osc.change_freq(factor)
-            osc.freqScale = factor
+            osc.detune(factor)
+        self.detune = factor
 
     def setup_stream(self):
         self.stream = pyaudio.PyAudio().open(
@@ -172,7 +158,7 @@ class Synthesizer(threading.Thread):
             channels=1,
             format=pyaudio.paInt16,
             output=True,
-            frames_per_buffer=256
+            frames_per_buffer=buffer_size
         )
 
     def play(self):
@@ -188,25 +174,38 @@ class Synthesizer(threading.Thread):
         def add_key(e):
             key = str.lower(e.name)
             # only adds it if it isn't there before.
-            if not (key in self.notes_dict) or self.notes_dict[key][1]:
+            if (not (key in self.notes_dict) or self.notes_dict[key][1]) and len(self.notes_dict) < max_voices:
                 osc = Oscillator(freq=key_frequencies[key],
                                  amp=0.2,
-                                 wave_shape=self.wave_shape
+                                 wave_shape=self.wave_shape,
+                                 detune=self.detune
                                  )
+                ADSR = ADSREnvelope(attack_duration=app.attack,
+                                    decay_duration=app.decay,
+                                    sustain_level=app.sustain,
+                                    release_duration=app.release,
+                                    sample_rate=sample_rate,
+                                    buffer_size=buffer_size)
+
                 # a list of all the modulators for amplitude. Always contains ADSR, can contain additional ones.
-                amp_modulators = [ADSREnvelope(attack_duration=app.attack,
-                                               decay_duration=app.decay,
-                                               sustain_level=app.sustain,
-                                               release_duration=app.release,
-                                               sample_rate=sample_rate)]
+                amp_modulators = [ADSR]
 
                 pitch_modulators = []
+                # # put in the selected LFOs
+                # for lfo_index in current_amp_LFO:
+                #     amp_modulators.append(LFOs[lfo_index])
+                #
+                # for lfo_index in current_pitch_LFO:
+                #     pitch_modulators.append(LFOs[lfo_index])
+                # NEW code
                 # put in the selected LFOs
-                for lfo_index in current_amp_LFO:
-                    amp_modulators.append(LFOs[lfo_index])
-
-                for lfo_index in current_pitch_LFO:
-                    pitch_modulators.append(LFOs[lfo_index])
+                for i in range(3):
+                    lfo = Oscillator(LFOs[i].freq, amp=LFOs[i].amp,
+                                                     buffer_size=buffer_size)
+                    if i in current_amp_LFO:
+                        amp_modulators.append(lfo)
+                    if i in current_pitch_LFO:
+                        pitch_modulators.append(lfo)
 
                 # for lfo_index in current_phase_LFO:
                 #     phase_modulators.append(LFOs[lfo_index])
@@ -257,16 +256,19 @@ class SynthesizerGui(App.Window):
     def onAmpChanged(self, *_):
         self.amp = self.amp_slider.get() / 100
         synth.amp = self.amp
+        self.oldAmp = 1
 
     def onPitchChanged(self, *_):
-        # pitch_factor = pow(2, self.pitch_slider.get() / 100)  # turns it in to a factor to multiply the base frequency by.
-        pitch_factor = self.pitch_slider.get() / 100
+        pitch_factor = pow(2,
+                           self.pitch_slider.get() / 100)  # turns it in to a factor to multiply the base frequency by.
+        # pitch_factor = self.pitch_slider.get() / 100
+        # print(pitch_factor)
         synth.update_pitch(pitch_factor)  # thread kinda needs to be defined before this is created, *shrug*
         self.pitch = pitch_factor
 
     # def onPhaseChanged(self, *_):
     #     pass
-        # do something
+    # do something
 
     # closing function which terminates the processes
     def on_closing(self):
@@ -319,6 +321,22 @@ class SynthesizerGui(App.Window):
             # period.set(oldFreq)
         # change the frequency
         LFOs[lfo_index].freq = newFreq
+
+    def onLFOAmpChanged(self, ampVal, LFO_index):
+        global LFOs
+
+        # change the period/frequency for the amplitude
+        try:
+            newAmp = float(ampVal.get())
+            # do nothing if its invalid
+            if newAmp > 1 or newAmp < 0:
+                ampVal.set(self.oldAmp)
+                return
+        except:
+            # don't change it if it is invalid
+            return
+        # change the amplitude
+        LFOs[LFO_index].amp = newAmp
 
 
 if __name__ == '__main__':

@@ -27,6 +27,43 @@ ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("syntheme.json")
 
 
+def make_LFO_frame(master, period_changed_function, amplitude_changed_function, LFO_index):
+    self = ctk.CTkFrame(master)
+    # self.grid(column=0, row=0)
+
+    self.lfo_label = ctk.CTkLabel(self, text=("LFO " + str(LFO_index + 1)))
+    self.lfo_label.grid(column=0, row=0)
+    # the period box
+    period_frame = ctk.CTkFrame(self)
+    period_frame.grid(column=0, row=1)
+
+    period_label = ctk.CTkLabel(period_frame, text="period")
+    period_label.grid(column=0, row=0)
+    period = newValVar(onValChanged=period_changed_function, lfo_index=LFO_index)
+    period_entry = ctk.CTkEntry(period_frame, width=90, textvariable=period)
+    period_entry.grid(column=0, row=1)  # stick defines which side of the grid it will be at
+    # the amplitude box
+    amplitude_frame = ctk.CTkFrame(self)
+    amplitude_frame.grid(column=0, row=2)
+    amplitude_label = ctk.CTkLabel(period_frame, text="amplitude", width=120)
+    amplitude_label.grid(column=0, row=3)
+
+    amplitude = newValVar(onValChanged=amplitude_changed_function, lfo_index=LFO_index)
+    amp_entry = ctk.CTkEntry(period_frame, width=90, textvariable=amplitude)
+    amp_entry.grid(column=0, row=4)  # stick defines which side of the grid it will be at
+
+    self.columnconfigure(tuple(range(10)), weight=1)
+    self.rowconfigure(tuple(range(5)), weight=1)
+    return self
+
+
+def newValVar(onValChanged, lfo_index):
+    string_var = tkinter.StringVar(value="1.0")
+    string_var.trace('w',
+                     lambda name, index, mode, string_var=string_var: onValChanged(string_var, lfo_index))
+    return string_var
+
+
 # code modified from https://stackoverflow.com/questions/59642558/how-to-set-tkinter-scale-sliders-color
 # for custom sliders.
 class SlimSlider(ttk.Scale):
@@ -63,10 +100,11 @@ class Window(ctk.CTk):
         self.amp = 0
         # create the gui
         panel_size = 300
-        self.geometry("600x600")
+        self.geometry("800x800")
         self.configure(bg="#270126")
         self.resizable(0, 0)
         self.title("SilverSynth v1")
+        # fire on_closing when window is closed.
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
         # load the icons
         self.sin_image = load_image(sin_image, image_size)
@@ -91,12 +129,16 @@ class Window(ctk.CTk):
         self.grid_columnconfigure(2, weight=1)
         self.grid_rowconfigure(2, weight=1)
 
+        # a 2x3 frame for the top half
+        self.upper_frame = ctk.CTkFrame(self)
+        self.upper_frame.grid(column=0, row=0)
+
         # the top left frame, where the ASDR knobs are
-        self.left_frame = ctk.CTkFrame(self, width=panel_size)
+        self.left_frame = ctk.CTkFrame(self.upper_frame, width=panel_size)
         self.left_frame.grid(column=0, row=0, sticky="NW")
         self.attack_label = ctk.CTkLabel(self.left_frame, text="Attack")
         self.attack_label.grid(column=0, row=1)
-        self.attack_slider = ctk.CTkSlider(self.left_frame, from_=0, to=1, number_of_steps=100, width=100)
+        self.attack_slider = ctk.CTkSlider(self.left_frame, from_=0.001, to=1, number_of_steps=100, width=100)
         self.attack_slider.grid(column=0, row=2)
         self.decay_label = ctk.CTkLabel(self.left_frame, text="Decay")
         self.decay_label.grid(column=0, row=3)
@@ -104,19 +146,19 @@ class Window(ctk.CTk):
         self.decay_slider.grid(column=0, row=4)
         self.sustain_label = ctk.CTkLabel(self.left_frame, text="Sustain")
         self.sustain_label.grid(column=0, row=5)
-        self.sustain_slider = ctk.CTkSlider(self.left_frame, from_=0, to=1, number_of_steps=100, width=100)
+        self.sustain_slider = ctk.CTkSlider(self.left_frame, from_=0.001, to=1, number_of_steps=100, width=100)
         self.sustain_slider.grid(column=0, row=6)
         self.release_label = ctk.CTkLabel(self.left_frame, text="Release")
         self.release_label.grid(column=0, row=7)
-        self.release_slider = ctk.CTkSlider(self.left_frame, from_=0, to=1, number_of_steps=100, width=100)
+        self.release_slider = ctk.CTkSlider(self.left_frame, from_=0.001, to=1, number_of_steps=100, width=100)
         self.release_slider.grid(column=0, row=8)
 
         # the middle top frame - empty?
-        self.mid_frame = ctk.CTkFrame(self)
+        self.mid_frame = ctk.CTkFrame(self.upper_frame)
         self.mid_frame.grid(column=1, row=0, sticky="nswe")
 
         # the top right frame, which houses the wave shape buttons and amp/pitch sldiers.
-        self.right_frame = ctk.CTkFrame(self, width=panel_size)
+        self.right_frame = ctk.CTkFrame(self.upper_frame, width=panel_size)
         self.right_frame.grid(column=2, row=0, sticky="ne")
         # 1st frame: the label
         self.waveshape_label = ctk.CTkLabel(self.right_frame, text="Waveshape")
@@ -162,21 +204,19 @@ class Window(ctk.CTk):
         self.pitch_LFO_frame.grid(column=1, row=2)
         make_LFO_buttons(self.pitch_LFO_frame, self.pitch_LFO_changed)
 
-        # the bottom left frame
-        self.bl_frame = ctk.CTkFrame(self)
-        self.bl_frame.grid(column=0, row=2, sticky="SE")
-        self.LFO1_frame = ctk.CTkFrame(self.bl_frame)
-        self.LFO1_frame.grid(column=0, row=0)
-        self.lfo1_label = ctk.CTkLabel(self.LFO1_frame, text="LFO 1")
-        self.lfo1_label.grid(column=0, row=0)
-        # the period box
-        self.period1_frame = ctk.CTkFrame(self.LFO1_frame)
-        self.period1_frame.grid(column=0, row=1)
-        self.period1_label = ctk.CTkLabel(self.period1_frame, text="period", width=90)
-        self.period1_label.grid()
-        self.period1 = self.new_period(0)
-        self.period1_entry = ctk.CTkEntry(self.period1_frame, width=100, textvariable=self.period1)
-        self.period1_entry.grid(column=0, row=1)  # stick defines which side of the grid it will be at
+        # the bottom frame
+        self.lower_frame = ctk.CTkFrame(self)
+        self.lower_frame.grid(column=0, row=1, sticky="s")
+        # make the LFO frames
+        self.lfo1_frame = make_LFO_frame(self.lower_frame, self.onPeriodChanged, self.onLFOAmpChanged, 0)
+        self.lfo1_frame.grid(column=0, row=0)
+        self.lfo2_frame = make_LFO_frame(self.lower_frame, self.onPeriodChanged, self.onLFOAmpChanged, 1)
+        self.lfo2_frame.grid(column=1, row=0)
+        self.lfo3_frame = make_LFO_frame(self.lower_frame, self.onPeriodChanged, self.onLFOAmpChanged, 2)
+        self.lfo3_frame.grid(column=2, row=0)
+
+    def on_closing(self):
+        pass
 
     # logarithmically calculate these so that you can be more precise with values near 0.
     @property
@@ -199,17 +239,11 @@ class Window(ctk.CTk):
         release = pow(max_adr + 1, self.release_slider.get()) - 1
         return release
 
-    # gets the amplitude from the amplitude slider
-    # @property
-    # def get_amplitude(self):
-    #     return self.amp_slider.get() / 100
-
     def onPitchChanged(self, *_):
         pass
 
     def onAmpChanged(self, *_):
         pass
-
 
     def shape_changed(self, index):
         pass
@@ -220,34 +254,11 @@ class Window(ctk.CTk):
     def pitch_LFO_changed(self, lfo_index):
         pass
 
-
     def LFO_changed(self, lfo_index, value_type):
         pass
 
     def onPeriodChanged(self, periodVal, lfo_index):
         pass
 
-    def new_period(self, lfo_index):
-        string_var = tkinter.StringVar(value="1.0")
-        string_var.trace('w',
-                         lambda name, index, mode, string_var=string_var: self.onPeriodChanged(string_var, lfo_index))
-        return string_var
-
-# creates the [1][2][3] buttons to change which LFO is affecting some value determined by command.
-# doesnt put it in the right place for some reason.
-# class LFOButtons(ctk.CTkFrame):
-#     def __init__(self, master2=None, command=None):
-#         super().__init__()
-#         self.master = master2
-#         self.LFO1_button = ctk.CTkButton(self, corner_radius=0,
-#                                          width=LFO_button_size, height=LFO_button_size,
-#                                          command=lambda: command(0), text="1", border_width=border_width)
-#         self.LFO1_button.grid(row=0, column=0, pady=1, padx=0, sticky="n")
-#         self.LFO2_button = ctk.CTkButton(self, corner_radius=0,
-#                                          width=LFO_button_size, height=LFO_button_size,
-#                                          command=lambda: command(1), text="2", border_width=border_width)
-#         self.LFO2_button.grid(row=0, column=1, pady=1, padx=0, sticky="n")
-#         self.LFO3_button = ctk.CTkButton(self, corner_radius=0,
-#                                          width=LFO_button_size, height=LFO_button_size,
-#                                          command=lambda: command(2), text="3", border_width=border_width)
-#         self.LFO3_button.grid(row=0, column=2, pady=1, padx=0, sticky="n")
+    def onLFOAmpChanged(self, ampVal, LFO_index):
+        pass
