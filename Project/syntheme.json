@@ -6,7 +6,7 @@
     "button_border": ["gray40", "gray40"],
     "checkbox_border": ["gray40", "gray60"],
     "checkmark": ["white", "gray90"],
-    "entry": ["white", "gray24"],
+    "entry": ["white", "#1c011c"],
     "entry_border": ["gray70", "gray32"],
     "entry_placeholder_text": ["gray52", "gray62"],
     "frame_border": ["gray70", "gray70"],

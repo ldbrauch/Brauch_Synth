@@ -22,12 +22,12 @@ buffer_size = 256
 
 # code modified from https://python.plainenglish.io/making-a-synth-with-python-oscillators-2cb8e68e9c3b
 class Oscillator(VariableOscillator):
-    def _initialize_osc(self):
-        self.wave_shape_to_func = [self._sine_iterator,
-                                   self._square_iterator,
-                                   self._saw_iterator,
-                                   self._triangle_iterator]
-        self.rend = self.wave_shape_to_func[self._wave_shape]  # the default
+    # def _initialize_osc(self):
+    #     self.wave_shape_to_func = [self._sine_iterator,
+    #                                self._square_iterator,
+    #                                self._saw_iterator,
+    #                                self._triangle_iterator]
+    #     self.rend = self.wave_shape_to_func[self._wave_shape]  # the default
 
     def _post_freq_set(self):
         # this can be a number or an array
@@ -48,7 +48,7 @@ class Oscillator(VariableOscillator):
     def _square_iterator(self):
         vals = np.sin(self.next_indexes)
         # threshold the value to -1 or 1
-        vals = np.where(vals > 0, 1, -1)
+        vals = np.where(vals > 0, 1.0, -1.0)
         return vals * self._a
 
     # generate a sawtooth wave
@@ -74,6 +74,7 @@ class Oscillator(VariableOscillator):
 
     # whenever the wave shape is changed it changes the function that __next__ calls.
     def change_wave_shape(self, new_wave_shape):
+        self.wave_shape
         self.rend = self.wave_shape_to_func[new_wave_shape]
 
 
@@ -193,30 +194,16 @@ class Synthesizer(threading.Thread):
                 amp_modulators = [ADSR]
 
                 pitch_modulators = []
-                # # put in the selected LFOs
-                # for lfo_index in current_amp_LFO:
-                #     amp_modulators.append(LFOs[lfo_index])
-                #
-                # for lfo_index in current_pitch_LFO:
-                #     pitch_modulators.append(LFOs[lfo_index])
-                # NEW code
-                # put in the selected LFOs
+                # if there are any LFOs, create the oscillators for them
                 for i in range(3):
-
                     if i in current_amp_LFO:
-                        lfo = Oscillator(LFOs[i].freq, amp=LFOs[i].amp,
+                        lfo = Oscillator(LFOs[i].freq, amp=LFOs[i].amp, wave_shape=LFOs[i].wave_shape,
                                          buffer_size=buffer_size)
                         amp_modulators.append(lfo)
                     if i in current_pitch_LFO:
-                        lfo = Oscillator(LFOs[i].freq, amp=LFOs[i].amp,
+                        lfo = Oscillator(LFOs[i].freq, amp=LFOs[i].amp, wave_shape=LFOs[i].wave_shape,
                                          buffer_size=buffer_size)
                         pitch_modulators.append(lfo)
-
-                # for lfo_index in current_phase_LFO:
-                #     phase_modulators.append(LFOs[lfo_index])
-
-                # sets the frequency incase the pitch slider is not at 1.
-                # osc.freq = osc.init_freq * app.pitch
 
                 self.notes_dict[key] = [ModulatedOscillator(osc,
                                                             amp_modulators=amp_modulators,
@@ -267,7 +254,6 @@ class SynthesizerGui(App.Window):
         pitch_factor = pow(2,
                            self.pitch_slider.get() / 100)  # turns it in to a factor to multiply the base frequency by.
         # pitch_factor = self.pitch_slider.get() / 100
-        # print(pitch_factor)
         synth.update_pitch(pitch_factor)  # thread kinda needs to be defined before this is created, *shrug*
         self.pitch = pitch_factor
 
@@ -281,39 +267,55 @@ class SynthesizerGui(App.Window):
         synth.stop()
         exit()
 
-    def shape_changed(self, index):
-        # doesn't fire twice if index is the same
-        if self.wave_shape == index:
-            return
-        # changes the sound to whatever index it is
-        synth.change_shape(shape_index=index)
-        self.wave_shape = index
+    def shape_changed(self, index, lfo):
+        # changed the total sound waveshape
+        if lfo is None:
+            # doesn't fire twice if index is the same
+            if self.wave_shape == index:
+                return
+            # change the color of the button
+            self.buttons[index].fg_color = self.active_color
+            self.buttons[self.wave_shape].fg_color = self.passive_color
+            # have to fire this or else it wont update until i hover over it
+            self.buttons[self.wave_shape].draw()
+            # changes the sound to whatever index it is
+            synth.change_shape(shape_index=index)
+            self.wave_shape = index
+        else:
+            # changes the waveshape of an LFO
+            # dont do anything if its already there
+            if LFOs[lfo].wave_shape == index:
+                return
+
+
+            # change the color of the button
+            self.lfo_buttons[lfo][index].fg_color = self.active_color
+            self.lfo_buttons[lfo][LFOs[lfo].wave_shape].fg_color = self.passive_color
+            self.lfo_buttons[lfo][LFOs[lfo].wave_shape].draw()
+            # changes the sound to whatever index it is
+            LFOs[lfo].wave_shape = index
+            # self.wave_shape = index
 
     def amp_LFO_changed(self, lfo_index):
         global current_amp_LFO
         # if it is already set and clicked again, remove it.
         if lfo_index in current_amp_LFO:
+            self.amp_lfo_buttons[lfo_index].fg_color = self.passive_color
             list.remove(current_amp_LFO, lfo_index)
         else:
+            # add the lfo to amplitude
+            self.amp_lfo_buttons[lfo_index].fg_color = self.active_color
             current_amp_LFO.append(lfo_index)
 
     def pitch_LFO_changed(self, lfo_index):
         global current_pitch_LFO
         # if it is already set and clicked again, remove it.
         if lfo_index in current_pitch_LFO:
+            self.pitch_lfo_buttons[lfo_index].fg_color = self.passive_color
             list.remove(current_pitch_LFO, lfo_index)
         else:
+            self.pitch_lfo_buttons[lfo_index].fg_color = self.active_color
             current_pitch_LFO.append(lfo_index)
-
-    # def phase_LFO_changed(self, lfo_index):
-    #     global current_phase_LFO
-    #     # if it is already set and clicked again, remove it.
-    #     if lfo_index in current_phase_LFO:
-    #         list.remove(current_phase_LFO, lfo_index)
-    #     else:
-    #         current_phase_LFO.append(lfo_index)
-    #     print("LFO for pitch changed to ")
-    #     print(current_phase_LFO)
 
     def onPeriodChanged(self, periodVal, lfo_index):
         global LFOs

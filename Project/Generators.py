@@ -28,7 +28,28 @@ class VariableOscillator(ABC):
         self.freq = freq
         self.phase = phase
         self.amp = amp
-        self._initialize_osc()
+
+        self.wave_shape_to_func = [self._sine_iterator,
+                                   self._square_iterator,
+                                   self._saw_iterator,
+                                   self._triangle_iterator]
+        self.rend = self.wave_shape_to_func[self._wave_shape]  # the default
+        # self._initialize_osc()
+
+    def _sine_iterator(self):
+        pass
+
+    # generates a square wave
+    def _square_iterator(self):
+        pass
+
+    # generate a sawtooth wave
+    def _saw_iterator(self):
+        pass
+
+    # generate a triangle wave
+    def _triangle_iterator(self):
+        pass
 
     # the initial properties
     @property
@@ -119,13 +140,9 @@ class VariableOscillator(ABC):
     def _post_phase_set(self):
         pass
 
-    @abstractmethod
-    def _initialize_osc(self):
-        pass
-
-    @staticmethod
-    def squish_val(val, min_val=0, max_val=1):
-        return (((val + 1) / 2) * (max_val - min_val)) + min_val
+    # @abstractmethod
+    # def _initialize_osc(self):
+    #     pass
 
     @abstractmethod
     def __next__(self):
@@ -133,6 +150,15 @@ class VariableOscillator(ABC):
 
     def sine_gen(self, num_frames):
         pass
+
+    @property
+    def wave_shape(self):
+        return self._wave_shape
+
+    @wave_shape.setter
+    def wave_shape(self, value):
+            self._wave_shape = value
+            self.rend = self.wave_shape_to_func[value]
 
 
 # a class that will modulate the oscillator via the modulators inputted.
@@ -159,10 +185,16 @@ class ModulatedOscillator:
 
     def _modulation(self):
         # if any amplitude modulators are passed through, modulate the sound.
-        if self.amp_mods:
-            amp_mod = np.prod([next(amp_mod) for amp_mod in self.amp_mods], axis=0)
+        asdr_mod = next(self.amp_mods[0])
+        self.oscillator.amps = self.oscillator.init_amp * asdr_mod
+
+        if len(self.amp_mods) > 1:
+            # mods = self.amp_mods[1:]
+            amp_mod = np.prod([next(amp_mod) for amp_mod in self.amp_mods[1:]], axis=0)
             # an array fo the next amplitudes
-            self.oscillator.amps = self.oscillator.init_amp * amp_mod
+            self.oscillator.amps = (self.oscillator.init_amp * amp_mod + self.oscillator.init_amp) * asdr_mod
+        else:
+            self.oscillator.amps = self.oscillator.init_amp * asdr_mod
 
         if self.freq_mods:
             freq_factors = pow(2, sum(next(freq_mod) for freq_mod in self.freq_mods))
