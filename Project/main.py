@@ -9,25 +9,21 @@ import keyboard
 import threading
 import App
 
-# sample rate must be low in order to allow complicated processes to take place smoothly.
-# sample_rate = 11025
-# you may need a fast computer to play multiple notes at once :/
+# the number of notes you can play at a time
 max_voices = 12
+# the quality of the sound
 sample_rate = 44100
+# how many samples are played at a time
 buffer_size = 256
-
-
-# def main():
+# the defualt LFO frequency
+default_LFO_freq = 1
+# the maximum amplitude for the LFOs. If above 1, may cause clipping.
+max_lfo_amp = 5
 
 
 # code modified from https://python.plainenglish.io/making-a-synth-with-python-oscillators-2cb8e68e9c3b
+# has a generator for basic waveshapes, and the used generator can be changed
 class Oscillator(VariableOscillator):
-    # def _initialize_osc(self):
-    #     self.wave_shape_to_func = [self._sine_iterator,
-    #                                self._square_iterator,
-    #                                self._saw_iterator,
-    #                                self._triangle_iterator]
-    #     self.rend = self.wave_shape_to_func[self._wave_shape]  # the default
 
     def _post_freq_set(self):
         # this can be a number or an array
@@ -55,7 +51,6 @@ class Oscillator(VariableOscillator):
     def _saw_iterator(self):
         end = self._i + self.buffer_size
         indexes = np.linspace(self._i, end, num=self.buffer_size, endpoint=False)
-
         divs = indexes / self._period
         floor = np.floor(0.5 + divs)
         vals = 2 * (divs - floor)
@@ -78,70 +73,45 @@ class Oscillator(VariableOscillator):
         self.rend = self.wave_shape_to_func[new_wave_shape]
 
 
-# class WaveAdder:
-#     def __init__(self, *oscillators):
-#         self.oscillators = oscillators
-#         self.n = len(oscillators)
-#
-#     def __iter__(self):
-#         [iter(osc) for osc in self.oscillators]
-#         return self
-#
-#     def __next__(self):
-#         return sum(next(osc) for osc in self.oscillators) / self.n
-
-
-# def Freq_mod(init_freq, val):
-#     pitch = pitch_slider.get() * 0.12  # divides by 100, multiplies by 12. This is from 0 to 12
-#     global pitch_shift
-#     pitch_shift = pow(2, pitch / 12)  # turns it in to a factor to multiply the base frequency by.
-#     print(pitch_shift)
-#
-#     return init_freq * val / 12
-
-
-# the default frequency
-
-default_LFO_freq = 1
-
+# the three starting LFOs. They will be modified via user input
 LFOs = [
     Oscillator(freq=default_LFO_freq, buffer_size=buffer_size),  # LFO1
     Oscillator(freq=default_LFO_freq, buffer_size=buffer_size),  # LFO2
     Oscillator(freq=default_LFO_freq, buffer_size=buffer_size)  # LFO3
 ]
 
-# a list of ints, indicating the idnex of the LFOs that are active.
+# a list of ints, indicating the index of the LFOs that are active.
 current_amp_LFO = []
 current_pitch_LFO = []
 
 
-# current_phase_LFO = []
-
-
+# this is the class that plays the sounds. It has to be in another thread so that the user can still interact with the  GUI.
 class Synthesizer(threading.Thread):
     def __init__(self):
         threading.Thread.__init__(self)
         self.stopping = False
         self.wave_shape = 0  # default waveshape of sine.
-        self.notes_dict = {}
+        self.notes_dict = {}  # all the notes that are being held down
         # the total volume basically
         self.amp = 0
+        # the frequency slider default detune of 1 = none. 2 = one octave.
         self.detune = 1
         self.setup_stream()
 
     def run(self):
         self.play()
 
-    def get_samples(self, dictionary, amp_scale=0.2, max_amp=0.8):
-
-        # samples = [osc[0].rend() * self.amp for _, osc in dictionary.items()]
-        # force it to copy all the values
+    # gets and returns all the necessary samples to be played
+    def get_samples(self, dictionary, amp_scale=0.2, max_amp=0.9):
+        # gets an array of arrays of all the samples by calling rend() on each ModulatedOscillator that is active
         samples = [osc[0].rend() * self.amp for _, osc in list(dictionary.items())]
         # sums up all the different sounds and reduces the volume
         samples = sum(samples) * amp_scale
         # clips the sound so that it doesn't burst your eardrums
         samples = np.int16(samples.clip(-max_amp, max_amp) * 32767)
-        return samples  # samples.reshape(num_samples, -1)
+        return samples
+
+        # this function changes the wave shape for all the oscillators that are being held down.
 
     def change_shape(self, shape_index):
         oscillators = [o[0] for k, o in self.notes_dict.items()]
@@ -149,12 +119,14 @@ class Synthesizer(threading.Thread):
             osc.change_wave_shape(shape_index)
         self.wave_shape = shape_index
 
+    # changes the pitch for all the oscillators when the slider is changed.
     def update_pitch(self, factor):
         oscillators = [o[0] for k, o in self.notes_dict.items()]
         for osc in oscillators:
             osc.detune(factor)
         self.detune = factor
 
+    # the stream is what plays the sound to your speakers.
     def setup_stream(self):
         self.stream = pyaudio.PyAudio().open(
             rate=sample_rate,
@@ -166,7 +138,7 @@ class Synthesizer(threading.Thread):
 
     def play(self):
         # gets the input and plays the notes
-        # these functions prevent add_key from continuously firing when the key is held down. DeBounce.
+        # these functions prevent add_key from continuously firing when the key is held down. AKA a debounce method.
         def remove_key(e):
             key = str.lower(e.name)
             keyboard.on_press_key(key, add_key)
@@ -208,7 +180,6 @@ class Synthesizer(threading.Thread):
                 self.notes_dict[key] = [ModulatedOscillator(osc,
                                                             amp_modulators=amp_modulators,
                                                             freq_modulators=pitch_modulators,
-                                                            # phase_modulators=phase_modulators,
                                                             freq_scale=app.pitch
                                                             ),
                                         False]
@@ -218,6 +189,7 @@ class Synthesizer(threading.Thread):
             keyboard.on_release_key(note, remove_key)
             keyboard.on_press_key(note, add_key)
 
+        # the while loop that detects if keys are held down and plays sounds if so.
         while True:
             if self.notes_dict:
                 # Play the notes
@@ -231,37 +203,31 @@ class Synthesizer(threading.Thread):
             ended_notes = [k for k, o in self.notes_dict.items() if o[0].ended and o[1]]
             for note in ended_notes:
                 del self.notes_dict[note]
-
+            # terminates the while loop if it is stopped
             if self.stopping:
-                print("Stopping!")
                 del self.notes_dict
                 break
 
+    # this may be necessary to stop the while loop incase it does not terminate.
     def stop(self):
         self.stopping = True
 
 
-# # the main gui
-# root = CTk()
-
+# the main gui
 class SynthesizerGui(App.Window):
     def onAmpChanged(self, *_):
         self.amp = self.amp_slider.get() / 100
         synth.amp = self.amp
+        # for the entry
         self.oldAmp = 1
 
     def onPitchChanged(self, *_):
         pitch_factor = pow(2,
                            self.pitch_slider.get() / 100)  # turns it in to a factor to multiply the base frequency by.
-        # pitch_factor = self.pitch_slider.get() / 100
         synth.update_pitch(pitch_factor)  # thread kinda needs to be defined before this is created, *shrug*
         self.pitch = pitch_factor
 
-    # def onPhaseChanged(self, *_):
-    #     pass
-    # do something
-
-    # closing function which terminates the processes
+    # closing function which terminates the processes when the window is closed
     def on_closing(self):
         self.destroy()
         synth.stop()
@@ -283,10 +249,9 @@ class SynthesizerGui(App.Window):
             self.wave_shape = index
         else:
             # changes the waveshape of an LFO
-            # dont do anything if its already there
+            # don't do anything if its already there
             if LFOs[lfo].wave_shape == index:
                 return
-
 
             # change the color of the button
             self.lfo_buttons[lfo][index].fg_color = self.active_color
@@ -336,7 +301,8 @@ class SynthesizerGui(App.Window):
         try:
             newAmp = float(ampVal.get())
             # do nothing if its invalid
-            if newAmp > 1 or newAmp < 0:
+
+            if newAmp > max_lfo_amp or newAmp < 0:
                 ampVal.set(self.oldAmp)
                 return
         except:
@@ -346,6 +312,7 @@ class SynthesizerGui(App.Window):
         LFOs[LFO_index].amp = newAmp
 
 
+# start the program
 if __name__ == '__main__':
     # the keyboard inputs and playing sounds
     synth = Synthesizer()

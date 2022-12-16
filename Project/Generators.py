@@ -198,10 +198,7 @@ class ModulatedOscillator:
 
         if self.freq_mods:
             freq_factors = pow(2, sum(next(freq_mod) for freq_mod in self.freq_mods))
-            # freq_factors = np.power(2, next(self.freq_mods[0]))
-            # freq_factors = next(self.freq_mods[0])
 
-            # print(freq_factors)
             self.oscillator.freq = freq_factors * self.oscillator.init_freq
 
     def change_wave_shape(self, shape_index):
